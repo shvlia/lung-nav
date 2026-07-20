@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Airway model &mdash; point picker</title>
+<script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+<style>
+  :root {
+    --bg: #0d1114; --panel: #161c21; --line: #263139;
+    --ink: #e6ecf0; --dim: #7d8e99; --route: #2de3a7;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font-family: system-ui, -apple-system, sans-serif;
+    margin: 0; padding: 20px;
+  }
+  h1 { font-size: 18px; font-weight: 500; margin: 0 0 4px; }
+  .sub { color: var(--dim); font-size: 13px; margin: 0 0 16px; }
+  a-scene {
+    width: 100%; height: 500px; display: block;
+    border: 1px solid var(--line); border-radius: 10px; overflow: hidden;
+  }
+  .panel {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 16px 18px; margin-top: 16px; max-width: 780px;
+  }
+  .row { display: flex; align-items: center; gap: 14px; margin-bottom: 10px; }
+  .label { font-size: 13px; color: var(--dim); min-width: 74px; }
+  input[type=range] { flex: 1; accent-color: var(--route); }
+  .value { font-family: ui-monospace, Menlo, monospace; font-size: 13px; min-width: 60px; text-align: right; }
+  button {
+    background: transparent; border: 1px solid var(--line); color: var(--dim);
+    border-radius: 6px; padding: 6px 12px; font-size: 12px;
+    font-family: inherit; cursor: pointer;
+  }
+  button:hover { color: var(--ink); border-color: var(--dim); }
+  button:focus-visible { outline: 2px solid var(--route); outline-offset: 2px; }
+  .pick { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); font-size: 13px; color: var(--dim); }
+  .pick b { font-family: ui-monospace, Menlo, monospace; font-weight: 400; color: var(--route); font-size: 15px; }
+  #list {
+    font-family: ui-monospace, Menlo, monospace; color: var(--ink);
+    font-size: 12px; margin-top: 10px; white-space: pre-wrap; min-height: 18px;
+  }
+  #status { color: var(--dim); font-size: 12px; margin-top: 10px; }
+</style>
+</head>
+<body>
+
+<h1>Airway model &mdash; point picker</h1>
+<p class="sub">Click anywhere on the model to read its coordinates &middot; drag to look &middot; W A S D to fly</p>
+
+<a-scene embedded background="color: #0d1114" vr-mode-ui="enabled: true">
+  <a-assets timeout="60000">
+    <a-asset-item id="treeAsset" src="scene.gltf"></a-asset-item>
+  </a-assets>
+
+  <a-entity id="model" gltf-model="#treeAsset" class="pickable" position="0 1.4 -2.5"></a-entity>
+  <a-entity id="markers"></a-entity>
+
+  <a-light type="ambient" color="#c4d0d8" intensity="0.95"></a-light>
+  <a-light type="directional" position="2 4 3" intensity="0.7"></a-light>
+
+  <a-entity id="rig" position="0 1.6 1.5">
+    <a-entity camera look-controls wasd-controls="acceleration: 12; fly: true"
+              cursor="rayOrigin: mouse" raycaster="objects: .pickable"></a-entity>
+  </a-entity>
+</a-scene>
+
+<div class="panel">
+  <div class="row">
+    <span class="label">Size</span>
+    <input id="scale" type="range" min="0" max="100" value="50" aria-label="Model scale">
+    <span class="value" id="scaleVal">1.00</span>
+  </div>
+  <div class="row">
+    <span class="label">Height</span>
+    <input id="posy" type="range" min="-200" max="400" value="140" aria-label="Model height">
+    <span class="value" id="posyVal">1.40</span>
+  </div>
+  <div class="row">
+    <span class="label">Turn</span>
+    <input id="roty" type="range" min="-180" max="180" value="0" aria-label="Model rotation">
+    <span class="value" id="rotyVal">0&deg;</span>
+  </div>
+  <div class="row">
+    <button id="reset" type="button">Reset view</button>
+    <button id="undo" type="button">Undo last point</button>
+    <button id="clear" type="button">Clear all</button>
+  </div>
+
+  <div class="pick">
+    Last point clicked: <b id="coord">&mdash;</b>
+    <div id="list"></div>
+    <div id="status">Loading model&hellip;</div>
+  </div>
+</div>
+
+<script>
+var scene  = document.querySelector('a-scene'),
+    model  = document.getElementById('model'),
+    marks  = document.getElementById('markers'),
+    rig    = document.getElementById('rig'),
+    scaleI = document.getElementById('scale'),
+    posyI  = document.getElementById('posy'),
+    rotyI  = document.getElementById('roty'),
+    status = document.getElementById('status'),
+    points = [];
+
+function applyScale() {
+  var s = Math.pow(10, (scaleI.value - 50) / 25);
+  model.setAttribute('scale', s + ' ' + s + ' ' + s);
+  document.getElementById('scaleVal').textContent = s.toFixed(3);
+}
+function applyPos() {
+  var y = posyI.value / 100;
+  model.setAttribute('position', '0 ' + y + ' -2.5');
+  document.getElementById('posyVal').textContent = y.toFixed(2);
+}
+function applyRot() {
+  model.setAttribute('rotation', '0 ' + rotyI.value + ' 0');
+  document.getElementById('rotyVal').textContent = rotyI.value + '\u00B0';
+}
+
+/* auto-fit once the mesh arrives, so it is never invisible or enormous */
+model.addEventListener('model-loaded', function (e) {
+  var box = new THREE.Box3().setFromObject(e.detail.model),
+      size = new THREE.Vector3();
+  box.getSize(size);
+  var biggest = Math.max(size.x, size.y, size.z);
+  if (biggest > 0) {
+    var wanted = 2.2 / biggest,
+        slider = 50 + 25 * Math.log10(wanted);
+    scaleI.value = Math.max(0, Math.min(100, slider));
+    applyScale();
+  }
+  status.textContent = 'Model loaded. Click on it to record points.';
+});
+
+scene.addEventListener('loaded', function () {
+  setTimeout(function () {
+    if (status.textContent.indexOf('Loading') === 0) {
+      status.textContent = 'Model has not loaded. Check that scene.gltf and scene.bin sit beside this file, '
+        + 'and that you are running through a local server or GitHub Pages rather than '
+        + 'opening the file directly.';
+    }
+  }, 8000);
+});
+
+model.addEventListener('click', function (e) {
+  if (!e.detail.intersection) return;
+  var p = e.detail.intersection.point,
+      trio = [p.x.toFixed(2), p.y.toFixed(2), p.z.toFixed(2)];
+
+  document.getElementById('coord').textContent = '[' + trio.join(', ') + ']';
+  points.push(trio);
+  redrawList();
+
+  var s = document.createElement('a-sphere');
+  s.setAttribute('position', p.x + ' ' + p.y + ' ' + p.z);
+  s.setAttribute('radius', 0.045);
+  s.setAttribute('color', '#2de3a7');
+  marks.appendChild(s);
+});
+
+function redrawList() {
+  document.getElementById('list').textContent =
+    points.map(function (t, i) {
+      return 'p' + (i + 1) + ': [' + t.join(', ') + '],';
+    }).join('\n');
+}
+
+document.getElementById('undo').onclick = function () {
+  points.pop();
+  if (marks.lastChild) marks.removeChild(marks.lastChild);
+  redrawList();
+};
+document.getElementById('clear').onclick = function () {
+  points = [];
+  while (marks.firstChild) marks.removeChild(marks.firstChild);
+  redrawList();
+  document.getElementById('coord').textContent = '\u2014';
+};
+document.getElementById('reset').onclick = function () {
+  rig.setAttribute('position', '0 1.6 1.5');
+  rig.setAttribute('rotation', '0 0 0');
+};
+
+scaleI.addEventListener('input', applyScale);
+posyI.addEventListener('input', applyPos);
+rotyI.addEventListener('input', applyRot);
+applyScale(); applyPos(); applyRot();
+</script>
+
+</body>
+</html>
