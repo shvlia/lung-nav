@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Airway model &mdash; my points</title>
+<script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+<style>
+  :root {
+    --bg: #0d1114; --panel: #161c21; --line: #263139;
+    --ink: #e6ecf0; --dim: #7d8e99; --route: #2de3a7;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font-family: system-ui, -apple-system, sans-serif;
+    margin: 0; padding: 20px;
+  }
+  h1 { font-size: 18px; font-weight: 500; margin: 0 0 4px; }
+  .sub { color: var(--dim); font-size: 13px; margin: 0 0 16px; }
+  a-scene {
+    width: 100%; height: 520px; display: block;
+    border: 1px solid var(--line); border-radius: 10px; overflow: hidden;
+  }
+  .panel {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 16px 18px; margin-top: 16px; max-width: 780px;
+  }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 4px; }
+  button {
+    background: transparent; border: 1px solid var(--line); color: var(--dim);
+    border-radius: 6px; padding: 7px 13px; font-size: 13px;
+    font-family: inherit; cursor: pointer;
+  }
+  button:hover { color: var(--ink); border-color: var(--dim); }
+  button:focus-visible { outline: 2px solid var(--route); outline-offset: 2px; }
+  #go { border-color: var(--route); color: var(--route); }
+  .pick { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); font-size: 13px; color: var(--dim); }
+  .pick b { font-family: ui-monospace, Menlo, monospace; font-weight: 400; color: var(--route); font-size: 15px; }
+  #list {
+    font-family: ui-monospace, Menlo, monospace; color: var(--ink);
+    font-size: 12px; margin-top: 10px; white-space: pre-wrap; min-height: 18px;
+  }
+  #status { color: var(--dim); font-size: 12px; margin-top: 10px; }
+</style>
+</head>
+<body>
+
+<h1>Airway model &mdash; my points</h1>
+<p class="sub">Your six points are marked on the model &middot; click to add more &middot; W A S D to fly</p>
+
+<a-scene embedded background="color: #0d1114" vr-mode-ui="enabled: true">
+  <a-assets timeout="60000">
+    <a-asset-item id="treeAsset" src="scene.gltf"></a-asset-item>
+  </a-assets>
+
+  <a-entity id="model" gltf-model="#treeAsset" class="pickable" position="0 1.4 -2.5"></a-entity>
+  <a-entity id="markers"></a-entity>
+
+  <a-light type="ambient" color="#c4d0d8" intensity="0.95"></a-light>
+  <a-light type="directional" position="2 4 3" intensity="0.7"></a-light>
+
+  <a-entity id="rig" position="0 1.6 1.5">
+    <a-entity camera look-controls wasd-controls="acceleration: 12; fly: true"
+              cursor="rayOrigin: mouse" raycaster="objects: .pickable"></a-entity>
+  </a-entity>
+</a-scene>
+
+<div class="panel">
+  <div class="row">
+    <button id="go" type="button">Fly to my points</button>
+    <button id="reset" type="button">Reset view</button>
+    <button id="undo" type="button">Undo last</button>
+    <button id="clear" type="button">Clear all</button>
+  </div>
+
+  <div class="pick">
+    Last point clicked: <b id="coord">&mdash;</b>
+    <div id="list"></div>
+    <div id="status">Loading model&hellip;</div>
+  </div>
+</div>
+
+<script>
+/* Your recorded points. Add or replace by clicking in the scene. */
+var points = [
+  [-0.39, -0.39, -5.11],
+  [-0.32, -0.53, -5.24],
+  [-0.52, -0.54, -5.08],
+  [-0.55, -0.36, -4.96],
+  [-0.71, -0.61, -5.09],
+  [-0.65, -0.68, -5.26]
+];
+
+var scene  = document.querySelector('a-scene'),
+    model  = document.getElementById('model'),
+    marks  = document.getElementById('markers'),
+    rig    = document.getElementById('rig'),
+    status = document.getElementById('status');
+
+/* auto-fit runs the same way every time, so the model always lands
+   in the same place and your saved points stay lined up */
+model.addEventListener('model-loaded', function (e) {
+  var box = new THREE.Box3().setFromObject(e.detail.model),
+      size = new THREE.Vector3();
+  box.getSize(size);
+  var biggest = Math.max(size.x, size.y, size.z);
+  if (biggest > 0) {
+    var s = 2.2 / biggest;
+    model.setAttribute('scale', s + ' ' + s + ' ' + s);
+  }
+  status.textContent = 'Model loaded. Press "Fly to my points" to find your markers.';
+  drawMarkers();
+});
+
+scene.addEventListener('loaded', function () {
+  setTimeout(function () {
+    if (status.textContent.indexOf('Loading') === 0) {
+      status.textContent = 'Model did not load. Check that scene.gltf and scene.bin are '
+        + 'in the same folder as this file.';
+    }
+  }, 8000);
+});
+
+function drawMarkers() {
+  while (marks.firstChild) marks.removeChild(marks.firstChild);
+  points.forEach(function (p, i) {
+    var s = document.createElement('a-sphere');
+    s.setAttribute('position', p[0] + ' ' + p[1] + ' ' + p[2]);
+    s.setAttribute('radius', 0.05);
+    s.setAttribute('color', '#2de3a7');
+    marks.appendChild(s);
+
+    var t = document.createElement('a-text');
+    t.setAttribute('value', 'p' + (i + 1));
+    t.setAttribute('position', (p[0] + 0.09) + ' ' + (p[1] + 0.09) + ' ' + p[2]);
+    t.setAttribute('color', '#ffffff');
+    t.setAttribute('width', 1.6);
+    marks.appendChild(t);
+  });
+  redrawList();
+}
+
+function redrawList() {
+  document.getElementById('list').textContent =
+    points.map(function (p, i) {
+      return 'p' + (i + 1) + ': [' + p.join(', ') + '],';
+    }).join('\n');
+}
+
+model.addEventListener('click', function (e) {
+  if (!e.detail.intersection) return;
+  var p = e.detail.intersection.point,
+      trio = [+p.x.toFixed(2), +p.y.toFixed(2), +p.z.toFixed(2)];
+  points.push(trio);
+  document.getElementById('coord').textContent = '[' + trio.join(', ') + ']';
+  drawMarkers();
+});
+
+document.getElementById('go').onclick = function () {
+  if (!points.length) return;
+  var c = [0, 0, 0];
+  points.forEach(function (p) { c[0] += p[0]; c[1] += p[1]; c[2] += p[2]; });
+  c = c.map(function (v) { return v / points.length; });
+  rig.setAttribute('position', c[0] + ' ' + c[1] + ' ' + (c[2] + 1.6));
+  rig.setAttribute('rotation', '0 0 0');
+};
+
+document.getElementById('reset').onclick = function () {
+  rig.setAttribute('position', '0 1.6 1.5');
+  rig.setAttribute('rotation', '0 0 0');
+};
+document.getElementById('undo').onclick = function () {
+  points.pop(); drawMarkers();
+};
+document.getElementById('clear').onclick = function () {
+  points = []; drawMarkers();
+  document.getElementById('coord').textContent = '\u2014';
+};
+</script>
+
+</body>
+</html>
