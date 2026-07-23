@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SPDR &mdash; airway navigation</title>
+<script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+<style>
+  :root {
+    --bg: #0d1114; --panel: #161c21; --line: #263139;
+    --ink: #e6ecf0; --dim: #7d8e99; --route: #2de3a7; --warn: #e8a33d;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font-family: system-ui, -apple-system, sans-serif;
+    margin: 0; padding: 18px;
+  }
+  h1 { font-size: 17px; font-weight: 500; margin: 0 0 3px; letter-spacing: .02em; }
+  .sub { color: var(--dim); font-size: 13px; margin: 0 0 14px; }
+  a-scene {
+    width: 100%; height: 520px; display: block;
+    border: 1px solid var(--line); border-radius: 10px; overflow: hidden;
+  }
+  .panel {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 14px 16px; margin-top: 14px; max-width: 900px;
+  }
+  .strip { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+  .strip + .strip { padding-top: 10px; border-top: 1px solid var(--line); }
+  .tag { font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: .08em; min-width: 74px; }
+  button {
+    background: transparent; border: 1px solid var(--line); color: var(--dim);
+    border-radius: 6px; padding: 6px 12px; font-size: 13px;
+    font-family: inherit; cursor: pointer;
+  }
+  button:hover { color: var(--ink); border-color: var(--dim); }
+  button:focus-visible { outline: 2px solid var(--route); outline-offset: 2px; }
+  button[aria-pressed="true"], .primary {
+    border-color: var(--route); color: var(--route); background: rgba(45,227,167,.08);
+  }
+  .danger:hover { border-color: var(--warn); color: var(--warn); }
+  .read { font-size: 13px; color: var(--dim); margin-top: 4px; }
+  .read b { color: var(--ink); font-weight: 500; }
+  #save {
+    width: 100%; height: 78px; margin-top: 8px; resize: vertical;
+    background: #0d1114; color: var(--ink); border: 1px solid var(--line);
+    border-radius: 6px; padding: 8px; font-family: ui-monospace, Menlo, monospace;
+    font-size: 11px; line-height: 1.5;
+  }
+</style>
+</head>
+<body>
+
+<h1>SPDR &mdash; airway navigation</h1>
+<p class="sub">Trace the airway once, mark the tumours, then every route generates itself</p>
+
+<a-scene embedded background="color: #0d1114" vr-mode-ui="enabled: true">
+  <a-assets timeout="60000">
+    <a-asset-item id="treeAsset" src="scene.gltf"></a-asset-item>
+  </a-assets>
+
+  <a-entity id="model" gltf-model="#treeAsset" class="pickable"
+            position="0 1.4 -2.5" rotation="0 0 0" scale="1 1 1"
+            material="opacity: 0.35; transparent: true"></a-entity>
+
+  <a-entity id="skeleton"></a-entity>
+  <a-entity id="route"></a-entity>
+  <a-entity id="nodes"></a-entity>
+
+  <a-light type="ambient" color="#c4d0d8" intensity="1"></a-light>
+  <a-light type="directional" position="2 4 3" intensity="0.6"></a-light>
+
+  <a-entity id="rig" position="0 1.6 1.5">
+    <a-entity id="cam" camera look-controls wasd-controls="acceleration: 10; fly: true"
+              cursor="rayOrigin: mouse" raycaster="objects: .pickable, .nodedot"></a-entity>
+  </a-entity>
+</a-scene>
+
+<div class="panel">
+  <div class="strip">
+    <span class="tag">Mode</span>
+    <button id="mTrace" type="button" aria-pressed="true">Trace airway</button>
+    <button id="mTumour" type="button" aria-pressed="false">Mark tumour</button>
+    <button id="undo" type="button">Undo</button>
+    <button id="wipe" type="button" class="danger">Clear all</button>
+  </div>
+
+  <div class="strip">
+    <span class="tag">Targets</span>
+    <span id="targets" class="read">no tumours marked yet</span>
+  </div>
+
+  <div class="strip">
+    <span class="tag">Flight</span>
+    <button id="fly" type="button" class="primary">Fly route</button>
+    <button id="loop" type="button" aria-pressed="false">Loop</button>
+    <button id="stop" type="button">Stop</button>
+    <button id="out" type="button">Outside view</button>
+  </div>
+
+  <p class="read" id="status">Loading model&hellip;</p>
+
+  <details>
+    <summary class="read" style="cursor:pointer">Save your work</summary>
+    <p class="read">Copy this and paste it into SAVED near the bottom of the file, so it reloads next time.</p>
+    <textarea id="save" readonly spellcheck="false"></textarea>
+  </details>
+</div>
+
+<script>
+/* ================================================================
+   SAVED — paste your copied data between the brackets to reload it.
+   ================================================================ */
+var SAVED = [];
+
+var scene = document.querySelector('a-scene'),
+    model = document.getElementById('model'),
+    rig   = document.getElementById('rig'),
+    cam   = document.getElementById('cam'),
+    skelEl = document.getElementById('skeleton'),
+    routeEl = document.getElementById('route'),
+    nodeEl = document.getElementById('nodes'),
+    statusEl = document.getElementById('status');
+
+var nodes = SAVED.slice(),   /* {p:[x,y,z], parent:index|null, tl:"TL1"|null} */
+    active = nodes.length ? nodes.length - 1 : null,
+    mode = 'trace',
+    target = null,
+    flying = false,
+    looping = false,
+    flightTimer = null,
+    home = { pos: '0 1.6 1.5', rot: '0 0 0' };
+
+/* ---------- geometry helpers ---------- */
+function V(a) { return new THREE.Vector3(a[0], a[1], a[2]); }
+function gap(a, b) { return V(a).distanceTo(V(b)); }
+
+function drawTube(parent, a, b, r, colour, opacity) {
+  var A = V(a), B = V(b), dir = new THREE.Vector3().subVectors(B, A), len = dir.length();
+  if (len < 0.0004) return;
+  var mid = new THREE.Vector3().addVectors(A, B).multiplyScalar(0.5),
+      q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,1,0), dir.clone().normalize()),
+      e = new THREE.Euler().setFromQuaternion(q), k = 180 / Math.PI,
+      el = document.createElement('a-cylinder');
+  el.setAttribute('position', mid.x + ' ' + mid.y + ' ' + mid.z);
+  el.setAttribute('rotation', (e.x*k) + ' ' + (e.y*k) + ' ' + (e.z*k));
+  el.setAttribute('radius', r);
+  el.setAttribute('height', len);
+  el.setAttribute('color', colour);
+  el.setAttribute('opacity', opacity);
+  el.setAttribute('transparent', 'true');
+  el.setAttribute('shader', 'flat');
+  parent.appendChild(el);
+}
+
+function clearEl(el) { while (el.firstChild) el.removeChild(el.firstChild); }
+
+/* ---------- the automatic routing ---------- */
+/* Walk from a tumour node up through its parents to the entrance. */
+function routeTo(index) {
+  var chain = [], guard = 0, i = index;
+  while (i !== null && i !== undefined && guard++ < 500) {
+    chain.push(nodes[i].p);
+    i = nodes[i].parent;
+  }
+  return chain.reverse();
+}
+
+/* ---------- drawing ---------- */
+function redraw() {
+  clearEl(skelEl); clearEl(nodeEl); clearEl(routeEl);
+
+  nodes.forEach(function (n, i) {
+    if (n.parent !== null && n.parent !== undefined) {
+      drawTube(skelEl, nodes[n.parent].p, n.p, 0.006, '#7d8e99', 0.5);
+    }
+    var dot = document.createElement('a-sphere');
+    dot.setAttribute('position', n.p.join(' '));
+    dot.setAttribute('radius', n.tl ? 0.022 : 0.012);
+    dot.setAttribute('color', n.tl ? '#e8a33d' : (i === active ? '#2de3a7' : '#54646f'));
+    dot.setAttribute('shader', 'flat');
+    dot.classList.add('nodedot');
+    dot.dataset.index = i;
+    nodeEl.appendChild(dot);
+
+    if (n.tl) {
+      var t = document.createElement('a-text');
+      t.setAttribute('value', n.tl);
+      t.setAttribute('position', (n.p[0] + 0.035) + ' ' + (n.p[1] + 0.035) + ' ' + n.p[2]);
+      t.setAttribute('color', '#e8a33d');
+      t.setAttribute('width', 0.9);
+      nodeEl.appendChild(t);
+    }
+  });
+
+  if (target !== null) {
+    var path = routeTo(target);
+    for (var i = 0; i < path.length - 1; i++) {
+      drawTube(routeEl, path[i], path[i+1], 0.011, '#2de3a7', 1);
+    }
+  }
+  refreshTargets();
+  document.getElementById('save').value = JSON.stringify(nodes);
+}
+
+function refreshTargets() {
+  var bar = document.getElementById('targets');
+  bar.innerHTML = '';
+  var any = false;
+  nodes.forEach(function (n, i) {
+    if (!n.tl) return;
+    any = true;
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = n.tl;
+    b.setAttribute('aria-pressed', String(i === target));
+    b.onclick = function () { target = i; redraw(); say('Route to ' + n.tl + ' generated.'); };
+    bar.appendChild(b);
+  });
+  if (!any) bar.textContent = 'no tumours marked yet';
+}
+
+function say(t) { statusEl.textContent = t; }
+
+/* ---------- clicking ---------- */
+scene.addEventListener('click', function (e) {
+  var el = e.target;
+
+  if (el && el.classList && el.classList.contains('nodedot')) {
+    var i = +el.dataset.index;
+    if (mode === 'tumour') {
+      var count = nodes.filter(function (n) { return n.tl; }).length;
+      nodes[i].tl = nodes[i].tl ? null : 'TL' + (count + 1);
+      say(nodes[i].tl ? nodes[i].tl + ' marked.' : 'Tumour removed.');
+    } else {
+      active = i;
+      say('Branching from this point. Click the airway to continue.');
+    }
+    redraw();
+    return;
+  }
+
+  if (el !== model) return;
+  var hit = e.detail && e.detail.intersection;
+  if (!hit) return;
+  var p = [+hit.point.x.toFixed(3), +hit.point.y.toFixed(3), +hit.point.z.toFixed(3)];
+
+  if (mode === 'trace') {
+    nodes.push({ p: p, parent: active, tl: null });
+    active = nodes.length - 1;
+    say(nodes.length === 1 ? 'Entrance set. Keep clicking down the airway.'
+                           : nodes.length + ' points traced.');
+    redraw();
+  } else {
+    say('Switch to Trace to add points, or click an existing point to mark it.');
+  }
+});
+
+/* ---------- flying inside the airway ---------- */
+function flyRoute() {
+  if (target === null) { say('Pick a target first.'); return; }
+  var path = routeTo(target);
+  if (path.length < 2) { say('That route needs more traced points.'); return; }
+
+  stopFlight();
+  flying = true;
+  cam.setAttribute('look-controls', 'enabled', false);
+  cam.setAttribute('wasd-controls', 'enabled', false);
+  cam.setAttribute('rotation', '0 0 0');
+
+  var legs = [], total = 0, i;
+  for (i = 0; i < path.length - 1; i++) {
+    var d = gap(path[i], path[i+1]);
+    legs.push(d); total += d;
+  }
+
+  var speed = total / 9,          /* whole route takes about nine seconds */
+      travelled = 0,
+      last = performance.now();
+
+  flightTimer = setInterval(function () {
+    var now = performance.now();
+    travelled += speed * (now - last) / 1000;
+    last = now;
+
+    if (travelled >= total) {
+      if (looping) { travelled = 0; }
+      else { stopFlight(); say('Arrived at ' + nodes[target].tl + '.'); return; }
+    }
+
+    var acc = 0, seg = 0;
+    while (seg < legs.length - 1 && acc + legs[seg] < travelled) { acc += legs[seg]; seg++; }
+    var f = legs[seg] > 0 ? (travelled - acc) / legs[seg] : 0,
+        here = V(path[seg]).lerp(V(path[seg+1]), Math.min(1, f)),
+        ahead = V(path[Math.min(seg + 1, path.length - 1)]);
+
+    rig.object3D.position.copy(here);
+    rig.object3D.lookAt(ahead);
+    rig.object3D.rotateY(Math.PI);   /* camera looks down -Z, so face forward */
+  }, 33);
+
+  say('Flying to ' + nodes[target].tl + '\u2026');
+}
+
+function stopFlight() {
+  flying = false;
+  if (flightTimer) { clearInterval(flightTimer); flightTimer = null; }
+  cam.setAttribute('look-controls', 'enabled', true);
+  cam.setAttribute('wasd-controls', 'enabled', true);
+}
+
+/* ---------- controls ---------- */
+function setMode(m) {
+  mode = m;
+  document.getElementById('mTrace').setAttribute('aria-pressed', String(m === 'trace'));
+  document.getElementById('mTumour').setAttribute('aria-pressed', String(m === 'tumour'));
+  say(m === 'trace'
+    ? 'Trace mode. Click the airway to lay points. Click an existing point to branch from it.'
+    : 'Tumour mode. Click a traced point to mark it as a tumour.');
+}
+
+document.getElementById('mTrace').onclick  = function () { setMode('trace'); };
+document.getElementById('mTumour').onclick = function () { setMode('tumour'); };
+
+document.getElementById('undo').onclick = function () {
+  if (!nodes.length) return;
+  nodes.pop();
+  active = nodes.length ? nodes.length - 1 : null;
+  if (target !== null && target >= nodes.length) target = null;
+  redraw();
+};
+
+document.getElementById('wipe').onclick = function () {
+  nodes = []; active = null; target = null; redraw(); say('Cleared.');
+};
+
+document.getElementById('fly').onclick = flyRoute;
+document.getElementById('stop').onclick = function () { stopFlight(); say('Stopped.'); };
+
+document.getElementById('loop').onclick = function () {
+  looping = !looping;
+  this.setAttribute('aria-pressed', String(looping));
+  say(looping ? 'Looping on \u2014 good for a background video.' : 'Looping off.');
+};
+
+document.getElementById('out').onclick = function () {
+  stopFlight();
+  rig.setAttribute('position', home.pos);
+  rig.setAttribute('rotation', home.rot);
+  cam.setAttribute('rotation', '0 0 0');
+  say('Outside view.');
+};
+
+/* ---------- startup ---------- */
+model.addEventListener('model-loaded', function (e) {
+  var box = new THREE.Box3().setFromObject(e.detail.model),
+      size = new THREE.Vector3(), centre = new THREE.Vector3();
+  box.getSize(size); box.getCenter(centre);
+  var back = Math.max(size.x, size.y, size.z) * 1.4;
+  home.pos = centre.x + ' ' + centre.y + ' ' + (centre.z + back);
+  rig.setAttribute('position', home.pos);
+  setMode('trace');
+  redraw();
+});
+
+scene.addEventListener('loaded', function () {
+  setTimeout(function () {
+    if (statusEl.textContent.indexOf('Loading') === 0) {
+      say('Model did not load. Check scene.gltf and scene.bin sit beside this file '
+        + 'and that you are opening it through GitHub Pages.');
+    }
+  }, 8000);
+});
+</script>
+
+</body>
+</html>
