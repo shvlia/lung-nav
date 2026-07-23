@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SPDR &mdash; navigation</title>
+<script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+<style>
+  :root {
+    --bg: #0b0f12; --panel: #141a1f; --line: #232d34;
+    --ink: #e8eef2; --dim: #7f9099; --route: #2de3a7; --tum: #ff7a45;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font-family: system-ui, -apple-system, sans-serif;
+    margin: 0; padding: 16px;
+  }
+  .head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 10px; }
+  h1 { font-size: 17px; font-weight: 600; margin: 0; letter-spacing: .06em; }
+  .sub { color: var(--dim); font-size: 13px; margin: 0; }
+  a-scene {
+    width: 100%; height: 500px; display: block;
+    border: 1px solid var(--line); border-radius: 10px; overflow: hidden;
+  }
+  .panel {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 14px 16px; margin-top: 12px; max-width: 960px;
+  }
+  .strip { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .strip + .strip { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+  .tag {
+    font-size: 11px; color: var(--dim); text-transform: uppercase;
+    letter-spacing: .1em; min-width: 60px;
+  }
+  button {
+    background: transparent; border: 1px solid var(--line); color: var(--dim);
+    border-radius: 6px; padding: 6px 12px; font-size: 13px;
+    font-family: inherit; cursor: pointer;
+  }
+  button:hover { color: var(--ink); border-color: var(--dim); }
+  button:focus-visible { outline: 2px solid var(--route); outline-offset: 2px; }
+  .go { border-color: var(--route); color: var(--route); }
+  .chip { padding: 5px 9px; font-size: 12px; }
+  .chip.here { border-color: var(--route); color: var(--route); background: rgba(45,227,167,.1); }
+  .chip.tum  { border-color: var(--tum);   color: var(--tum);   background: rgba(255,122,69,.1); }
+  .star { padding: 5px 7px; font-size: 12px; margin-left: -6px; border-left: none;
+          border-top-left-radius: 0; border-bottom-left-radius: 0; }
+  .pair { display: inline-flex; }
+  .pair .chip { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+  #targets button[aria-pressed="true"] {
+    border-color: var(--tum); color: var(--tum); background: rgba(255,122,69,.1);
+  }
+  .read { font-size: 13px; color: var(--dim); margin: 12px 0 0; min-height: 18px; }
+  .read b { color: var(--route); font-weight: 500; }
+  #save {
+    width: 100%; height: 60px; margin-top: 8px; resize: vertical;
+    background: #0b0f12; color: var(--ink); border: 1px solid var(--line);
+    border-radius: 6px; padding: 8px; font-family: ui-monospace, Menlo, monospace;
+    font-size: 11px;
+  }
+</style>
+</head>
+<body>
+
+<div class="head">
+  <h1>SPDR</h1>
+  <p class="sub">click the airway to lay points &middot; drag to look &middot; W A S D to fly</p>
+</div>
+
+<a-scene embedded background="color: #0b0f12" vr-mode-ui="enabled: true">
+  <a-assets timeout="60000">
+    <a-asset-item id="treeAsset" src="scene.gltf"></a-asset-item>
+  </a-assets>
+
+  <a-entity id="model" gltf-model="#treeAsset" class="pickable"
+            position="0 0 0" rotation="0 0 0" scale="1 1 1"></a-entity>
+
+  <a-entity id="skel"></a-entity>
+  <a-entity id="route"></a-entity>
+  <a-entity id="dots"></a-entity>
+
+  <a-light type="ambient" color="#bcd0da" intensity="1"></a-light>
+  <a-light type="directional" position="3 6 4" intensity="0.55"></a-light>
+
+  <a-entity id="rig" position="0 0 4">
+    <a-entity id="cam" camera="near: 0.005" look-controls
+              wasd-controls="acceleration: 8; fly: true"
+              cursor="rayOrigin: mouse" raycaster="objects: .pickable"></a-entity>
+  </a-entity>
+</a-scene>
+
+<div class="panel">
+  <div class="strip">
+    <span class="tag">Points</span>
+    <span id="chips" style="display:flex;gap:6px;flex-wrap:wrap"></span>
+    <button id="undo" type="button">Undo</button>
+    <button id="wipe" type="button">Clear</button>
+  </div>
+
+  <div class="strip">
+    <span class="tag">Targets</span>
+    <span id="targets" style="display:flex;gap:6px;flex-wrap:wrap"></span>
+  </div>
+
+  <div class="strip">
+    <span class="tag">View</span>
+    <button id="fly"  class="go" type="button">Fly route</button>
+    <button id="tour" class="go" type="button">Tour all</button>
+    <button id="loop" type="button" aria-pressed="false">Loop</button>
+    <button id="stop" type="button">Stop</button>
+    <button id="out"  type="button">Outside</button>
+  </div>
+
+  <p class="read" id="status">Loading model&hellip;</p>
+
+  <details>
+    <summary class="read" style="cursor:pointer">Save your work</summary>
+    <p class="read">Copy this, then paste it between the brackets of SAVED at the bottom of the file.</p>
+    <textarea id="save" readonly spellcheck="false"></textarea>
+  </details>
+</div>
+
+<script>
+/* ==========================================================
+   SAVED — paste your copied points between these brackets.
+   ========================================================== */
+var SAVED = [];
+
+var scene = document.querySelector('a-scene'),
+    model = document.getElementById('model'),
+    skelEl = document.getElementById('skel'),
+    routeEl = document.getElementById('route'),
+    dotEl = document.getElementById('dots'),
+    rig = document.getElementById('rig'),
+    cam = document.getElementById('cam'),
+    statusEl = document.getElementById('status');
+
+var nodes = SAVED.slice(),
+    here = nodes.length ? nodes.length - 1 : null,
+    target = null,
+    looping = false, timer = null, queue = [],
+    scale = 1, home = '0 0 4';
+
+function V(a){ return new THREE.Vector3(a[0],a[1],a[2]); }
+function gap(a,b){ return V(a).distanceTo(V(b)); }
+function wipe(el){ while(el.firstChild) el.removeChild(el.firstChild); }
+function say(h){ statusEl.innerHTML = h; }
+
+function tube(parent,a,b,r,colour,opacity,flat){
+  var A=V(a),B=V(b),dir=new THREE.Vector3().subVectors(B,A),len=dir.length();
+  if(len<0.0004) return;
+  var mid=new THREE.Vector3().addVectors(A,B).multiplyScalar(0.5),
+      q=new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,1,0),dir.clone().normalize()),
+      e=new THREE.Euler().setFromQuaternion(q),k=180/Math.PI,
+      el=document.createElement('a-cylinder');
+  el.setAttribute('position',mid.x+' '+mid.y+' '+mid.z);
+  el.setAttribute('rotation',(e.x*k)+' '+(e.y*k)+' '+(e.z*k));
+  el.setAttribute('radius',r); el.setAttribute('height',len);
+  el.setAttribute('material','color: '+colour+'; opacity: '+opacity+
+    '; transparent: true; side: double'+(flat?'; shader: flat':''));
+  parent.appendChild(el);
+}
+
+/* route = walk parents back to the entrance */
+function routeTo(i){
+  var chain=[],guard=0;
+  while(i!==null&&i!==undefined&&guard++<300){ chain.push(nodes[i].p); i=nodes[i].parent; }
+  return chain.reverse();
+}
+
+function redraw(){
+  wipe(skelEl); wipe(dotEl); wipe(routeEl);
+  var u = scale;
+
+  nodes.forEach(function(n,i){
+    if(n.parent!==null&&n.parent!==undefined)
+      tube(skelEl,nodes[n.parent].p,n.p,0.012*u,'#7f9099',0.75,true);
+
+    var d=document.createElement('a-sphere');
+    d.setAttribute('position',n.p.join(' '));
+    d.setAttribute('radius',(n.tl?0.03:0.018)*u);
+    d.setAttribute('material','color: '+(n.tl?'#ff7a45':(i===here?'#2de3a7':'#54646f'))+
+      '; shader: flat');
+    dotEl.appendChild(d);
+
+    if(n.tl){
+      var t=document.createElement('a-text');
+      t.setAttribute('value',n.tl);
+      t.setAttribute('position',(n.p[0]+0.05*u)+' '+(n.p[1]+0.05*u)+' '+n.p[2]);
+      t.setAttribute('color','#ff7a45');
+      t.setAttribute('width',1.2*u);
+      dotEl.appendChild(t);
+    }
+  });
+
+  if(target!==null&&nodes[target]){
+    var path=routeTo(target);
+    for(var i=0;i<path.length-1;i++)
+      tube(routeEl,path[i],path[i+1],0.02*u,'#2de3a7',1,true);
+  }
+
+  drawChips(); drawTargets();
+  document.getElementById('save').value=JSON.stringify(nodes);
+}
+
+function drawChips(){
+  var box=document.getElementById('chips'); box.innerHTML='';
+  if(!nodes.length){ box.textContent='click the airway to place your first point'; return; }
+  nodes.forEach(function(n,i){
+    var pair=document.createElement('span'); pair.className='pair';
+    var b=document.createElement('button');
+    b.type='button'; b.className='chip'+(i===here?' here':'')+(n.tl?' tum':'');
+    b.textContent=n.tl||(i+1);
+    b.title='continue from here';
+    b.onclick=function(){ here=i; redraw(); say('Continuing from point '+(i+1)+'. Click the airway.'); };
+    var s=document.createElement('button');
+    s.type='button'; s.className='star'; s.textContent='\u2605';
+    s.title='mark as tumour';
+    s.onclick=function(){
+      if(n.tl){ n.tl=null; }
+      else { n.tl='TL'+(nodes.filter(function(x){return x.tl;}).length+1); }
+      redraw();
+    };
+    pair.appendChild(b); pair.appendChild(s); box.appendChild(pair);
+  });
+}
+
+function drawTargets(){
+  var box=document.getElementById('targets'); box.innerHTML='';
+  var any=false;
+  nodes.forEach(function(n,i){
+    if(!n.tl) return; any=true;
+    var b=document.createElement('button');
+    b.type='button'; b.textContent=n.tl;
+    b.setAttribute('aria-pressed',String(i===target));
+    b.onclick=function(){ halt(); target=i; redraw(); say('Route to <b>'+n.tl+'</b> generated.'); };
+    box.appendChild(b);
+  });
+  if(!any) box.textContent='star a point to make it a tumour';
+}
+
+/* ---- clicking the model ---- */
+model.addEventListener('click',function(e){
+  var hit=e.detail&&e.detail.intersection; if(!hit) return;
+  var p=[+hit.point.x.toFixed(4),+hit.point.y.toFixed(4),+hit.point.z.toFixed(4)];
+  nodes.push({p:p,parent:here,tl:null});
+  here=nodes.length-1;
+  redraw();
+  say(nodes.length+' point'+(nodes.length>1?'s':'')+' placed.');
+});
+
+/* ---- flying ---- */
+function flyPath(path,done){
+  halt(true);
+  cam.setAttribute('look-controls','enabled',false);
+  cam.setAttribute('wasd-controls','enabled',false);
+  cam.setAttribute('rotation','0 0 0');
+  var legs=[],total=0,i;
+  for(i=0;i<path.length-1;i++){ var d=gap(path[i],path[i+1]); legs.push(d); total+=d; }
+  if(!total){ halt(); return; }
+  var speed=total/9,gone=0,last=performance.now();
+  timer=setInterval(function(){
+    var now=performance.now(); gone+=speed*(now-last)/1000; last=now;
+    if(gone>=total){
+      if(done){ clearInterval(timer); timer=null; done(); return; }
+      if(looping){ gone=0; } else { halt(); say('Arrived.'); return; }
+    }
+    var acc=0,seg=0;
+    while(seg<legs.length-1&&acc+legs[seg]<gone){ acc+=legs[seg]; seg++; }
+    var f=legs[seg]>0?(gone-acc)/legs[seg]:0,
+        at=V(path[seg]).lerp(V(path[seg+1]),Math.min(1,f)),
+        ahead=V(path[Math.min(seg+1,path.length-1)]);
+    rig.object3D.position.copy(at);
+    rig.object3D.lookAt(ahead);
+    rig.object3D.rotateY(Math.PI);
+  },33);
+}
+
+function halt(keep){
+  if(timer){ clearInterval(timer); timer=null; }
+  if(!keep){
+    cam.setAttribute('look-controls','enabled',true);
+    cam.setAttribute('wasd-controls','enabled',true);
+  }
+}
+
+document.getElementById('fly').onclick=function(){
+  if(target===null){ say('Pick a target first.'); return; }
+  say('Flying to <b>'+nodes[target].tl+'</b>\u2026');
+  flyPath(routeTo(target));
+};
+
+function nextLeg(){
+  if(!queue.length){ if(looping){ startTour(); return; } halt(); say('Tour complete.'); return; }
+  var i=queue.shift(); target=i; redraw();
+  say('Touring \u2014 <b>'+nodes[i].tl+'</b>');
+  flyPath(routeTo(i),function(){ setTimeout(nextLeg,700); });
+}
+function startTour(){
+  queue=nodes.map(function(n,i){ return n.tl?i:-1; }).filter(function(i){ return i>=0; });
+  if(!queue.length){ say('No tumours marked yet.'); return; }
+  nextLeg();
+}
+document.getElementById('tour').onclick=startTour;
+
+document.getElementById('loop').onclick=function(){
+  looping=!looping; this.setAttribute('aria-pressed',String(looping));
+  say(looping?'Looping on \u2014 leave it running behind your pitch.':'Looping off.');
+};
+document.getElementById('stop').onclick=function(){ queue=[]; halt(); say('Stopped.'); };
+document.getElementById('out').onclick=function(){
+  queue=[]; halt();
+  rig.setAttribute('position',home); rig.setAttribute('rotation','0 0 0');
+  cam.setAttribute('rotation','0 0 0'); say('Outside view.');
+};
+document.getElementById('undo').onclick=function(){
+  if(!nodes.length) return;
+  nodes.pop(); here=nodes.length?nodes.length-1:null;
+  if(target!==null&&target>=nodes.length) target=null;
+  redraw();
+};
+document.getElementById('wipe').onclick=function(){
+  nodes=[]; here=null; target=null; redraw(); say('Cleared.');
+};
+
+/* ---- startup ---- */
+model.addEventListener('model-loaded',function(e){
+  e.detail.model.traverse(function(o){
+    if(o.isMesh&&o.material){
+      o.material.transparent=true; o.material.opacity=0.4;
+      o.material.side=THREE.DoubleSide; o.material.depthWrite=false;
+    }
+  });
+  var box=new THREE.Box3().setFromObject(e.detail.model),
+      size=new THREE.Vector3(),c=new THREE.Vector3();
+  box.getSize(size); box.getCenter(c);
+  scale=Math.max(size.x,size.y,size.z)/3;
+  home=c.x+' '+c.y+' '+(c.z+Math.max(size.x,size.y,size.z)*1.4);
+  rig.setAttribute('position',home);
+  say('Model loaded. Click the airway to place your first point.');
+  redraw();
+});
+
+scene.addEventListener('loaded',function(){
+  setTimeout(function(){
+    if(statusEl.textContent.indexOf('Loading')===0)
+      say('Model did not load. Check scene.gltf and scene.bin are beside this file.');
+  },8000);
+});
+</script>
+
+</body>
+</html>
