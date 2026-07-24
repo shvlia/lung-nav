@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SPDR &mdash; navigation</title>
+<script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+<style>
+  :root {
+    --bg: #0b0f12; --panel: #141a1f; --line: #232d34;
+    --ink: #e8eef2; --dim: #7f9099; --route: #2de3a7; --tum: #ff7a45;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font-family: system-ui, -apple-system, sans-serif;
+    margin: 0; padding: 16px;
+  }
+  h1 { font-size: 17px; font-weight: 600; margin: 0 0 3px; letter-spacing: .06em; }
+  .sub { color: var(--dim); font-size: 13px; margin: 0 0 10px; }
+  a-scene {
+    width: 100%; height: 500px; display: block;
+    border: 1px solid var(--line); border-radius: 10px; overflow: hidden;
+  }
+  .panel {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 14px 16px; margin-top: 12px; max-width: 960px;
+  }
+  .strip { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .strip + .strip { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+  .tag {
+    font-size: 11px; color: var(--dim); text-transform: uppercase;
+    letter-spacing: .1em; min-width: 58px;
+  }
+  button {
+    background: transparent; border: 1px solid var(--line); color: var(--dim);
+    border-radius: 6px; padding: 6px 12px; font-size: 13px;
+    font-family: inherit; cursor: pointer;
+  }
+  button:hover { color: var(--ink); border-color: var(--dim); }
+  button:focus-visible { outline: 2px solid var(--route); outline-offset: 2px; }
+  .go { border-color: var(--route); color: var(--route); }
+  .chip { padding: 5px 9px; font-size: 12px; }
+  .chip.here { border-color: var(--route); color: var(--route); background: rgba(45,227,167,.1); }
+  .chip.tum  { border-color: var(--tum);   color: var(--tum);   background: rgba(255,122,69,.1); }
+  .star { padding: 5px 7px; font-size: 12px; margin-left: -6px;
+          border-top-left-radius: 0; border-bottom-left-radius: 0; }
+  .pair { display: inline-flex; }
+  .pair .chip { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+  #targets button[aria-pressed="true"] {
+    border-color: var(--tum); color: var(--tum); background: rgba(255,122,69,.1);
+  }
+  .read { font-size: 13px; color: var(--dim); margin: 12px 0 0; min-height: 18px; }
+  .read b { color: var(--route); font-weight: 500; }
+  #save {
+    width: 100%; height: 56px; margin-top: 8px; resize: vertical;
+    background: #0b0f12; color: var(--ink); border: 1px solid var(--line);
+    border-radius: 6px; padding: 8px; font-family: ui-monospace, Menlo, monospace;
+    font-size: 11px;
+  }
+</style>
+</head>
+<body>
+
+<h1>SPDR</h1>
+<p class="sub">drag to look &middot; W A S D to move &middot; click the airway to place points</p>
+
+<a-scene embedded background="color: #0b0f12" vr-mode-ui="enabled: true">
+  <a-assets timeout="60000">
+    <a-asset-item id="treeAsset" src="scene.gltf"></a-asset-item>
+  </a-assets>
+
+  <a-entity id="model" gltf-model="#treeAsset" class="pickable"></a-entity>
+  <a-entity id="skel"></a-entity>
+  <a-entity id="route"></a-entity>
+  <a-entity id="dots"></a-entity>
+
+  <a-light type="ambient" color="#bcd0da" intensity="1"></a-light>
+  <a-light type="directional" position="3 6 4" intensity="0.55"></a-light>
+
+  <a-entity id="rig" position="0 0 4">
+    <a-entity id="cam" camera="near: 0.005" look-controls
+              wasd-controls="fly: true"
+              cursor="rayOrigin: mouse" raycaster="objects: .pickable"></a-entity>
+  </a-entity>
+</a-scene>
+
+<div class="panel">
+  <div class="strip">
+    <span class="tag">Speed</span>
+    <button class="slow" type="button" data-mul="0.4">slower</button>
+    <button class="slow" type="button" data-mul="2.5">faster</button>
+    <span class="read" id="speedRead" style="margin:0"></span>
+  </div>
+
+  <div class="strip">
+    <span class="tag">Points</span>
+    <span id="chips" style="display:flex;gap:6px;flex-wrap:wrap"></span>
+    <button id="undo" type="button">Undo</button>
+    <button id="wipe" type="button">Clear</button>
+  </div>
+
+  <div class="strip">
+    <span class="tag">Targets</span>
+    <span id="targets" style="display:flex;gap:6px;flex-wrap:wrap"></span>
+  </div>
+
+  <div class="strip">
+    <span class="tag">View</span>
+    <button id="fly"  class="go" type="button">Fly route</button>
+    <button id="stop" type="button">Stop</button>
+    <button id="out"  type="button">Outside</button>
+  </div>
+
+  <p class="read" id="status">Loading model&hellip;</p>
+
+  <details open>
+    <summary class="read" style="cursor:pointer">Save &amp; load points</summary>
+    <p class="read" style="margin-top:6px">
+      Copy this after tracing. To bring it back later, paste it in and press Load.
+    </p>
+    <textarea id="save" spellcheck="false"></textarea>
+    <div class="strip" style="margin-top:8px;padding-top:0;border:none">
+      <button id="load" class="go" type="button">Load pasted points</button>
+      <span class="read" id="loadmsg" style="margin:0"></span>
+    </div>
+  </details>
+</div>
+
+<script>
+/* =========================================================
+   SAVED — paste your copied points between these brackets.
+   ========================================================= */
+var SAVED = [{"p":[7.3327,-5.8574,-230.8853],"parent":null,"tl":null},{"p":[5.7563,-10.6217,-231.0056],"parent":0,"tl":null},{"p":[5.2016,-14.386,-231.6845],"parent":1,"tl":null},{"p":[4.6547,-19.0746,-232.4659],"parent":2,"tl":null},{"p":[4.5057,-23.9655,-233.5298],"parent":3,"tl":null},{"p":[4.0852,-28.0266,-234.1147],"parent":4,"tl":null},{"p":[3.3877,-32.2821,-234.3992],"parent":5,"tl":null},{"p":[2.8828,-37.1151,-234.7193],"parent":6,"tl":null},{"p":[2.1694,-43.7569,-236.19],"parent":7,"tl":null},{"p":[1.8482,-50.1535,-237.7733],"parent":8,"tl":null},{"p":[1.6332,-55.6153,-239.1305],"parent":9,"tl":null},{"p":[1.7204,-61.0943,-240.5498],"parent":10,"tl":null},{"p":[1.671,-66.7993,-242.2945],"parent":11,"tl":null},{"p":[1.2736,-73.9304,-243.7944],"parent":12,"tl":null},{"p":[-0.2393,-80.5546,-244.5563],"parent":13,"tl":null},{"p":[-1.4403,-86.4999,-245.1203],"parent":14,"tl":null},{"p":[-3.2445,-92.9313,-245.4325],"parent":15,"tl":null},{"p":[-3.9695,-97.5281,-247.026],"parent":16,"tl":null},{"p":[-5.3947,-102.5037,-247.727],"parent":17,"tl":null},{"p":[-6.538,-106.0714,-249.7673],"parent":18,"tl":null},{"p":[-9.836,-111.8452,-251.1914],"parent":19,"tl":null},{"p":[-13.6946,-117.0462,-251.228],"parent":20,"tl":null},{"p":[-17.9486,-121.0738,-250.1462],"parent":21,"tl":null},{"p":[-19.7064,-126.2981,-249.2181],"parent":22,"tl":null},{"p":[-20.4109,-130.618,-249.704],"parent":23,"tl":null},{"p":[-20.8465,-135.9408,-251.1985],"parent":24,"tl":null},{"p":[-21.2498,-139.3903,-252.0589],"parent":25,"tl":null},{"p":[-23.355,-142.6035,-253.1422],"parent":26,"tl":null},{"p":[-24.7741,-147.3314,-252.5134],"parent":27,"tl":null},{"p":[-21.8372,-154.6096,-251.1518],"parent":28,"tl":null},{"p":[-23.8478,-159.0471,-250.1903],"parent":29,"tl":null},{"p":[-31.1847,-164.3154,-247.4465],"parent":30,"tl":null},{"p":[-35.6959,-166.3226,-245.7287],"parent":31,"tl":null},{"p":[-35.9521,-166.3668,-242.3175],"parent":32,"tl":null},{"p":[-35.9521,-166.3668,-242.3175],"parent":33,"tl":null},{"p":[-39.9506,-167.8692,-240.3205],"parent":34,"tl":null},{"p":[-39.5761,-170.4006,-235.2561],"parent":35,"tl":null},{"p":[-43.7586,-171.1485,-232.7449],"parent":36,"tl":"TL4"},{"p":[-24.7587,-164.5585,-257.3942],"parent":30,"tl":null},{"p":[-25.2771,-167.2869,-260.3062],"parent":38,"tl":null},{"p":[-29.1003,-171.7352,-258.6166],"parent":39,"tl":null},{"p":[-33.7466,-177.6752,-258.785],"parent":40,"tl":null},{"p":[-38.6738,-173.3089,-257.6297],"parent":41,"tl":"TL1"},{"p":[-32.3299,-181.601,-265.6386],"parent":41,"tl":null},{"p":[-31.9254,-185.5909,-267.99],"parent":43,"tl":null},{"p":[-32.8024,-188.046,-272.9227],"parent":44,"tl":null},{"p":[-32.7541,-187.7451,-277.6219],"parent":45,"tl":"TL2"},{"p":[-41.6806,-180.0227,-257.6811],"parent":41,"tl":null},{"p":[-47.8849,-184.4512,-256.2102],"parent":47,"tl":null},{"p":[-51.7914,-191.4462,-255.983],"parent":48,"tl":"TL3"},{"p":[-61.2439,-195.4299,-258.7888],"parent":49,"tl":null},{"p":[-69.137,-195.1735,-263.2938],"parent":50,"tl":"TL5"},{"p":[-39.618,-182.7347,-260.9635],"parent":41,"tl":null},{"p":[-38.2221,-185.4539,-263.1806],"parent":52,"tl":null},{"p":[-43.7358,-187.3324,-265.8661],"parent":53,"tl":null},{"p":[-46.9065,-189.6397,-267.145],"parent":54,"tl":null},{"p":[-50.7759,-191.0154,-269.2247],"parent":55,"tl":null},{"p":[-55.1874,-194.3844,-271.817],"parent":56,"tl":null},{"p":[-58.7881,-196.7092,-273.4786],"parent":57,"tl":null},{"p":[-61.0878,-199.0023,-275.1721],"parent":58,"tl":"TL6"}];
+
+var scene=document.querySelector('a-scene'),
+    model=document.getElementById('model'),
+    skelEl=document.getElementById('skel'),
+    routeEl=document.getElementById('route'),
+    dotEl=document.getElementById('dots'),
+    rig=document.getElementById('rig'),
+    cam=document.getElementById('cam'),
+    statusEl=document.getElementById('status');
+
+var nodes=SAVED.slice(),
+    here=nodes.length?nodes.length-1:null,
+    target=null, timer=null,
+    unit=1, home='0 0 4', accel=65;
+
+function V(a){ return new THREE.Vector3(a[0],a[1],a[2]); }
+function gap(a,b){ return V(a).distanceTo(V(b)); }
+function wipe(el){ while(el.firstChild) el.removeChild(el.firstChild); }
+function say(h){ statusEl.innerHTML=h; }
+
+function setAccel(v){
+  accel=Math.max(1,v);
+  cam.setAttribute('wasd-controls','acceleration: '+accel.toFixed(1)+'; fly: true');
+  document.getElementById('speedRead').textContent=accel.toFixed(0);
+}
+
+function tube(parent,a,b,r,colour,opacity){
+  var A=V(a),B=V(b),dir=new THREE.Vector3().subVectors(B,A),len=dir.length();
+  if(len<1e-6) return;
+  var mid=new THREE.Vector3().addVectors(A,B).multiplyScalar(0.5),
+      q=new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,1,0),dir.clone().normalize()),
+      e=new THREE.Euler().setFromQuaternion(q),k=180/Math.PI,
+      el=document.createElement('a-cylinder');
+  el.setAttribute('position',mid.x+' '+mid.y+' '+mid.z);
+  el.setAttribute('rotation',(e.x*k)+' '+(e.y*k)+' '+(e.z*k));
+  el.setAttribute('radius',r); el.setAttribute('height',len);
+  el.setAttribute('material','color: '+colour+'; opacity: '+opacity+
+    '; transparent: true; side: double; shader: flat');
+  parent.appendChild(el);
+}
+
+function routeTo(i){
+  var chain=[],guard=0;
+  while(i!==null&&i!==undefined&&guard++<300){ chain.push(nodes[i].p); i=nodes[i].parent; }
+  return chain.reverse();
+}
+
+function redraw(){
+  wipe(skelEl); wipe(dotEl); wipe(routeEl);
+
+  nodes.forEach(function(n,i){
+    if(n.parent!==null&&n.parent!==undefined)
+      tube(skelEl,nodes[n.parent].p,n.p,0.012*unit,'#7f9099',0.8);
+
+    var d=document.createElement('a-sphere');
+    d.setAttribute('position',n.p.join(' '));
+    d.setAttribute('radius',(n.tl?0.032:0.018)*unit);
+    d.setAttribute('material','color: '+(n.tl?'#ff7a45':(i===here?'#2de3a7':'#54646f'))+'; shader: flat');
+    dotEl.appendChild(d);
+
+    if(n.tl){
+      var t=document.createElement('a-text');
+      t.setAttribute('value',n.tl);
+      t.setAttribute('position',(n.p[0]+0.055*unit)+' '+(n.p[1]+0.055*unit)+' '+n.p[2]);
+      t.setAttribute('color','#ff7a45');
+      t.setAttribute('width',1.3*unit);
+      dotEl.appendChild(t);
+    }
+  });
+
+  if(target!==null&&nodes[target]){
+    var path=routeTo(target);
+    for(var i=0;i<path.length-1;i++)
+      tube(routeEl,path[i],path[i+1],0.02*unit,'#2de3a7',1);
+  }
+
+  drawChips(); drawTargets();
+  document.getElementById('save').value=JSON.stringify(nodes);
+}
+
+function drawChips(){
+  var box=document.getElementById('chips'); box.innerHTML='';
+  if(!nodes.length){ box.textContent='click the airway to place your first point'; return; }
+  nodes.forEach(function(n,i){
+    var pair=document.createElement('span'); pair.className='pair';
+    var b=document.createElement('button');
+    b.type='button'; b.className='chip'+(i===here?' here':'')+(n.tl?' tum':'');
+    b.textContent=n.tl||(i+1);
+    b.title='continue from this point';
+    b.onclick=function(){ here=i; redraw(); say('Continuing from point '+(i+1)+'.'); };
+    var s=document.createElement('button');
+    s.type='button'; s.className='star'; s.textContent='\u2605';
+    s.title='mark as tumour';
+    s.onclick=function(){
+      n.tl = n.tl ? null : 'TL'+(nodes.filter(function(x){return x.tl;}).length+1);
+      redraw();
+    };
+    pair.appendChild(b); pair.appendChild(s); box.appendChild(pair);
+  });
+}
+
+function drawTargets(){
+  var box=document.getElementById('targets'); box.innerHTML='';
+  var any=false;
+  nodes.forEach(function(n,i){
+    if(!n.tl) return; any=true;
+    var b=document.createElement('button');
+    b.type='button'; b.textContent=n.tl;
+    b.setAttribute('aria-pressed',String(i===target));
+    b.onclick=function(){ stopFlight(); target=i; redraw(); say('Route to <b>'+n.tl+'</b> ready.'); };
+    box.appendChild(b);
+  });
+  if(!any) box.textContent='press \u2605 on a point to make it a tumour';
+}
+
+model.addEventListener('click',function(e){
+  var hit=e.detail&&e.detail.intersection; if(!hit) return;
+  var p=[+hit.point.x.toFixed(4),+hit.point.y.toFixed(4),+hit.point.z.toFixed(4)];
+  nodes.push({p:p,parent:here,tl:null});
+  here=nodes.length-1;
+  redraw();
+  say(nodes.length+' point'+(nodes.length>1?'s':'')+' placed.');
+});
+
+function stopFlight(){
+  if(timer){ clearInterval(timer); timer=null; }
+  cam.setAttribute('look-controls','enabled',true);
+  setAccel(accel);
+}
+
+document.getElementById('fly').onclick=function(){
+  if(target===null){ say('Pick a target first.'); return; }
+  var path=routeTo(target);
+  if(path.length<2){ say('That route needs more points.'); return; }
+
+  stopFlight();
+  cam.setAttribute('look-controls','enabled',false);
+  cam.setAttribute('wasd-controls','enabled',false);
+  cam.setAttribute('rotation','0 0 0');
+  say('Flying to <b>'+nodes[target].tl+'</b>\u2026');
+
+  var legs=[],total=0,i;
+  for(i=0;i<path.length-1;i++){ var d=gap(path[i],path[i+1]); legs.push(d); total+=d; }
+  var speed=total/9,gone=0,last=performance.now();
+
+  timer=setInterval(function(){
+    var now=performance.now(); gone+=speed*(now-last)/1000; last=now;
+    if(gone>=total){ stopFlight(); say('Arrived at <b>'+nodes[target].tl+'</b>.'); return; }
+    var acc=0,seg=0;
+    while(seg<legs.length-1&&acc+legs[seg]<gone){ acc+=legs[seg]; seg++; }
+    var f=legs[seg]>0?(gone-acc)/legs[seg]:0,
+        at=V(path[seg]).lerp(V(path[seg+1]),Math.min(1,f)),
+        ahead=V(path[Math.min(seg+1,path.length-1)]);
+    rig.object3D.position.copy(at);
+    rig.object3D.lookAt(ahead);
+    rig.object3D.rotateY(Math.PI);
+  },33);
+};
+
+document.getElementById('stop').onclick=function(){ stopFlight(); say('Stopped.'); };
+document.getElementById('out').onclick=function(){
+  stopFlight();
+  rig.setAttribute('position',home); rig.setAttribute('rotation','0 0 0');
+  cam.setAttribute('rotation','0 0 0'); say('Outside view.');
+};
+document.getElementById('undo').onclick=function(){
+  if(!nodes.length) return;
+  nodes.pop(); here=nodes.length?nodes.length-1:null;
+  if(target!==null&&target>=nodes.length) target=null;
+  redraw();
+};
+document.getElementById('wipe').onclick=function(){
+  nodes=[]; here=null; target=null; redraw(); say('Cleared.');
+};
+Array.prototype.forEach.call(document.querySelectorAll('.slow'),function(b){
+  b.onclick=function(){ setAccel(accel*parseFloat(b.dataset.mul)); };
+});
+
+document.getElementById('load').onclick=function(){
+  var msg=document.getElementById('loadmsg'),
+      raw=document.getElementById('save').value.trim().replace(/;+$/,'');
+  if(!raw){ msg.textContent='Nothing pasted.'; return; }
+  var data;
+  try{ data=JSON.parse(raw); }
+  catch(err){ msg.textContent='That is not valid \u2014 paste the whole thing including [ and ].'; return; }
+  if(!Array.isArray(data)){ msg.textContent='Expected a list of points.'; return; }
+  var ok=data.every(function(n){ return n&&Array.isArray(n.p)&&n.p.length===3; });
+  if(!ok){ msg.textContent='Points are the wrong shape.'; return; }
+
+  nodes=data;
+  here=nodes.length?nodes.length-1:null;
+  target=null;
+  redraw();
+  msg.textContent=nodes.length+' points loaded.';
+  say('Loaded '+nodes.length+' points.');
+};
+
+model.addEventListener('model-loaded',function(e){
+  e.detail.model.traverse(function(o){
+    if(o.isMesh&&o.material){
+      o.material.transparent=true; o.material.opacity=0.4;
+      o.material.side=THREE.DoubleSide; o.material.depthWrite=false;
+    }
+  });
+  var box=new THREE.Box3().setFromObject(e.detail.model),
+      size=new THREE.Vector3(),c=new THREE.Vector3();
+  box.getSize(size); box.getCenter(c);
+  var big=Math.max(size.x,size.y,size.z)||1;
+
+  unit=big/3;
+  home=c.x+' '+c.y+' '+(c.z+big*1.4);
+  rig.setAttribute('position',home);
+
+  /* movement speed matched to how big the model actually is */
+  setAccel(big*12);
+  cam.setAttribute('camera','near: '+(big/900)+'; far: '+(big*12));
+
+  say('Model loaded. Click the airway to place your first point.');
+  redraw();
+});
+
+scene.addEventListener('loaded',function(){
+  setTimeout(function(){
+    if(statusEl.textContent.indexOf('Loading')===0)
+      say('Model did not load. Check scene.gltf and scene.bin are beside this file.');
+  },8000);
+});
+</script>
+
+</body>
+</html>
