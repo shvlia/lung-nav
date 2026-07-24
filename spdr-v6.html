@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SPDR &mdash; navigation</title>
+<script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+<style>
+  :root {
+    --bg:#07090b; --panel:#11171c; --line:#1f2a31;
+    --ink:#e9eff3; --dim:#78888f; --route:#2de3a7; --tum:#ff7a45; --done:#3d4a52;
+  }
+  *{box-sizing:border-box}
+  body{background:var(--bg);color:var(--ink);
+    font-family:system-ui,-apple-system,sans-serif;margin:0;padding:16px}
+  .top{display:flex;align-items:baseline;gap:12px;margin-bottom:10px}
+  h1{font-size:17px;font-weight:600;margin:0;letter-spacing:.08em}
+  .sub{color:var(--dim);font-size:13px;margin:0}
+  a-scene{width:100%;height:540px;display:block;
+    border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+    padding:14px 16px;margin-top:12px;max-width:980px}
+  .strip{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .strip+.strip{margin-top:12px;padding-top:12px;border-top:1px solid var(--line)}
+  .tag{font-size:11px;color:var(--dim);text-transform:uppercase;
+    letter-spacing:.12em;min-width:66px}
+  button{background:transparent;border:1px solid var(--line);color:var(--dim);
+    border-radius:7px;padding:7px 14px;font-size:13px;font-family:inherit;
+    cursor:pointer;transition:all .12s}
+  button:hover{color:var(--ink);border-color:var(--dim)}
+  button:focus-visible{outline:2px solid var(--route);outline-offset:2px}
+  .go{border-color:var(--route);color:var(--route)}
+  .go:hover{background:rgba(45,227,167,.12);color:var(--route);border-color:var(--route)}
+  .tl[aria-pressed="true"]{border-color:var(--tum);color:var(--tum);
+    background:rgba(255,122,69,.12)}
+  .tl.done{border-color:var(--done);color:var(--done);text-decoration:line-through}
+  .read{font-size:13px;color:var(--dim);margin:12px 0 0;min-height:18px}
+  .read b{color:var(--route);font-weight:500}
+</style>
+</head>
+<body>
+
+<div class="top">
+  <h1>SPDR</h1>
+  <p class="sub">select targets &middot; routes plan themselves &middot; fly the airway</p>
+</div>
+
+<a-scene embedded vr-mode-ui="enabled: true"
+         renderer="colorManagement: true; antialias: true"
+         background="color: #07090b">
+  <a-assets timeout="60000">
+    <a-asset-item id="tree" src="scene.gltf"></a-asset-item>
+  </a-assets>
+
+  <a-entity id="model" gltf-model="#tree"></a-entity>
+  <a-entity id="paths"></a-entity>
+  <a-entity id="marks"></a-entity>
+
+  <a-light type="ambient" color="#cfe0e8" intensity="0.85"></a-light>
+  <a-light type="directional" position="4 8 6" intensity="0.45"></a-light>
+  <a-light id="head" type="point" intensity="0" distance="0" color="#ffe9dc"></a-light>
+
+  <a-entity id="rig">
+    <a-entity id="cam" camera look-controls wasd-controls="fly: true"></a-entity>
+  </a-entity>
+</a-scene>
+
+<div class="panel">
+  <div class="strip">
+    <span class="tag">Targets</span>
+    <span id="tls" style="display:flex;gap:8px;flex-wrap:wrap"></span>
+    <button id="all" type="button">Select all</button>
+    <button id="none" type="button">Clear</button>
+  </div>
+
+  <div class="strip">
+    <span class="tag">Procedure</span>
+    <button id="fly" class="go" type="button">Fly selected</button>
+    <button id="stop" type="button">Stop</button>
+    <button id="out" type="button">Outside view</button>
+    <button id="reset" type="button">Reset progress</button>
+  </div>
+
+  <div class="strip">
+    <span class="tag">Speed</span>
+    <button class="sp" type="button" data-m="0.6">slower</button>
+    <button class="sp" type="button" data-m="1.7">faster</button>
+    <span class="read" id="spread" style="margin:0"></span>
+  </div>
+
+  <p class="read" id="msg">Loading anatomy&hellip;</p>
+</div>
+
+<script>
+/* ---------------------------------------------------------------
+   Traced airway. Each node has a position and its parent, so a
+   route is found by walking parents back to the entrance.
+   --------------------------------------------------------------- */
+var NODES = [{"p":[7.3327,-5.8574,-230.8853],"parent":null,"tl":null},{"p":[5.7563,-10.6217,-231.0056],"parent":0,"tl":null},{"p":[5.2016,-14.386,-231.6845],"parent":1,"tl":null},{"p":[4.6547,-19.0746,-232.4659],"parent":2,"tl":null},{"p":[4.5057,-23.9655,-233.5298],"parent":3,"tl":null},{"p":[4.0852,-28.0266,-234.1147],"parent":4,"tl":null},{"p":[3.3877,-32.2821,-234.3992],"parent":5,"tl":null},{"p":[2.8828,-37.1151,-234.7193],"parent":6,"tl":null},{"p":[2.1694,-43.7569,-236.19],"parent":7,"tl":null},{"p":[1.8482,-50.1535,-237.7733],"parent":8,"tl":null},{"p":[1.6332,-55.6153,-239.1305],"parent":9,"tl":null},{"p":[1.7204,-61.0943,-240.5498],"parent":10,"tl":null},{"p":[1.671,-66.7993,-242.2945],"parent":11,"tl":null},{"p":[1.2736,-73.9304,-243.7944],"parent":12,"tl":null},{"p":[-0.2393,-80.5546,-244.5563],"parent":13,"tl":null},{"p":[-1.4403,-86.4999,-245.1203],"parent":14,"tl":null},{"p":[-3.2445,-92.9313,-245.4325],"parent":15,"tl":null},{"p":[-3.9695,-97.5281,-247.026],"parent":16,"tl":null},{"p":[-5.3947,-102.5037,-247.727],"parent":17,"tl":null},{"p":[-6.538,-106.0714,-249.7673],"parent":18,"tl":null},{"p":[-9.836,-111.8452,-251.1914],"parent":19,"tl":null},{"p":[-13.6946,-117.0462,-251.228],"parent":20,"tl":null},{"p":[-17.9486,-121.0738,-250.1462],"parent":21,"tl":null},{"p":[-19.7064,-126.2981,-249.2181],"parent":22,"tl":null},{"p":[-20.4109,-130.618,-249.704],"parent":23,"tl":null},{"p":[-20.8465,-135.9408,-251.1985],"parent":24,"tl":null},{"p":[-21.2498,-139.3903,-252.0589],"parent":25,"tl":null},{"p":[-23.355,-142.6035,-253.1422],"parent":26,"tl":null},{"p":[-24.7741,-147.3314,-252.5134],"parent":27,"tl":null},{"p":[-21.8372,-154.6096,-251.1518],"parent":28,"tl":null},{"p":[-23.8478,-159.0471,-250.1903],"parent":29,"tl":null},{"p":[-31.1847,-164.3154,-247.4465],"parent":30,"tl":null},{"p":[-35.6959,-166.3226,-245.7287],"parent":31,"tl":null},{"p":[-35.9521,-166.3668,-242.3175],"parent":32,"tl":null},{"p":[-35.9521,-166.3668,-242.3175],"parent":33,"tl":null},{"p":[-39.9506,-167.8692,-240.3205],"parent":34,"tl":null},{"p":[-39.5761,-170.4006,-235.2561],"parent":35,"tl":null},{"p":[-43.7586,-171.1485,-232.7449],"parent":36,"tl":"TL4"},{"p":[-24.7587,-164.5585,-257.3942],"parent":30,"tl":null},{"p":[-25.2771,-167.2869,-260.3062],"parent":38,"tl":null},{"p":[-29.1003,-171.7352,-258.6166],"parent":39,"tl":null},{"p":[-33.7466,-177.6752,-258.785],"parent":40,"tl":null},{"p":[-38.6738,-173.3089,-257.6297],"parent":41,"tl":"TL1"},{"p":[-32.3299,-181.601,-265.6386],"parent":41,"tl":null},{"p":[-31.9254,-185.5909,-267.99],"parent":43,"tl":null},{"p":[-32.8024,-188.046,-272.9227],"parent":44,"tl":null},{"p":[-32.7541,-187.7451,-277.6219],"parent":45,"tl":"TL2"},{"p":[-41.6806,-180.0227,-257.6811],"parent":41,"tl":null},{"p":[-47.8849,-184.4512,-256.2102],"parent":47,"tl":null},{"p":[-51.7914,-191.4462,-255.983],"parent":48,"tl":"TL3"},{"p":[-61.2439,-195.4299,-258.7888],"parent":49,"tl":null},{"p":[-69.137,-195.1735,-263.2938],"parent":50,"tl":"TL5"},{"p":[-39.618,-182.7347,-260.9635],"parent":41,"tl":null},{"p":[-38.2221,-185.4539,-263.1806],"parent":52,"tl":null},{"p":[-43.7358,-187.3324,-265.8661],"parent":53,"tl":null},{"p":[-46.9065,-189.6397,-267.145],"parent":54,"tl":null},{"p":[-50.7759,-191.0154,-269.2247],"parent":55,"tl":null},{"p":[-55.1874,-194.3844,-271.817],"parent":56,"tl":null},{"p":[-58.7881,-196.7092,-273.4786],"parent":57,"tl":null},{"p":[-61.0878,-199.0023,-275.1721],"parent":58,"tl":"TL6"}];
+
+var scene=document.querySelector('a-scene'),
+    model=document.getElementById('model'),
+    pathsEl=document.getElementById('paths'),
+    marksEl=document.getElementById('marks'),
+    rig=document.getElementById('rig'),
+    cam=document.getElementById('cam'),
+    head=document.getElementById('head'),
+    msgEl=document.getElementById('msg');
+
+var unit=1, home=new THREE.Vector3(0,0,4), lookHome=new THREE.Vector3(),
+    selected=[], done=[], curves={}, tunnels={},
+    flying=false, raf=null, speedMul=1;
+
+var TUMOURS={};
+NODES.forEach(function(n,i){ if(n.tl) TUMOURS[n.tl]=i; });
+var ORDER=Object.keys(TUMOURS).sort();
+
+var bigDim=1, shellMats=[];
+
+/* wide fog when looking from outside, tight fog when flying inside */
+function setFog(inside){
+  if(inside){
+    scene.setAttribute('fog','type: linear; color: #07090b; near: '+
+      (bigDim*0.004)+'; far: '+(bigDim*0.22));
+  } else {
+    scene.setAttribute('fog','type: linear; color: #07090b; near: '+
+      (bigDim*2.5)+'; far: '+(bigDim*6));
+  }
+}
+
+function setShell(op){
+  shellMats.forEach(function(m){ m.opacity=op; m.needsUpdate=true; });
+}
+
+function V(a){ return new THREE.Vector3(a[0],a[1],a[2]); }
+function msg(h){ msgEl.innerHTML=h; }
+
+/* route = walk parents back to the entrance */
+function routeOf(name){
+  var i=TUMOURS[name], chain=[], guard=0;
+  while(i!==null&&i!==undefined&&guard++<300){ chain.push(V(NODES[i].p)); i=NODES[i].parent; }
+  return chain.reverse();
+}
+
+/* drop duplicate points, which would break the spline */
+function clean(pts){
+  var out=[pts[0]];
+  for(var i=1;i<pts.length;i++)
+    if(pts[i].distanceTo(out[out.length-1])>1e-4) out.push(pts[i]);
+  return out;
+}
+
+function buildCurves(){
+  ORDER.forEach(function(name){
+    var pts=clean(routeOf(name));
+    if(pts.length>1) curves[name]=new THREE.CatmullRomCurve3(pts,false,'centripetal',0.5);
+  });
+}
+
+/* a smooth tube along the route -- this is what you fly through */
+function makeTunnel(name){
+  var c=curves[name];
+  if(!c) return;
+  var geo=new THREE.TubeGeometry(c,Math.max(64,c.points.length*8),unit*0.55,16,false),
+      mat=new THREE.MeshBasicMaterial({
+        color:0x2de3a7, transparent:true, opacity:0.22,
+        side:THREE.DoubleSide, depthWrite:false });
+  var mesh=new THREE.Mesh(geo,mat);
+  var holder=document.createElement('a-entity');
+  holder.setObject3D('mesh',mesh);
+  holder.dataset.tl=name;
+  pathsEl.appendChild(holder);
+  tunnels[name]={mesh:mesh,mat:mat};
+}
+
+function refreshTunnels(){
+  while(pathsEl.firstChild) pathsEl.removeChild(pathsEl.firstChild);
+  tunnels={};
+  selected.forEach(makeTunnel);
+  selected.forEach(function(n){
+    if(done.indexOf(n)>=0&&tunnels[n]){
+      tunnels[n].mat.color.set(0x3d4a52);
+      tunnels[n].mat.opacity=0.13;
+    }
+  });
+}
+
+function drawMarks(){
+  while(marksEl.firstChild) marksEl.removeChild(marksEl.firstChild);
+  ORDER.forEach(function(name){
+    var p=NODES[TUMOURS[name]].p,
+        on=selected.indexOf(name)>=0,
+        fin=done.indexOf(name)>=0;
+    var s=document.createElement('a-sphere');
+    s.setAttribute('position',p.join(' '));
+    s.setAttribute('radius',unit*(on?0.85:0.6));
+    s.setAttribute('material','shader: flat; transparent: true; opacity: '+
+      (fin?0.35:0.95)+'; color: '+(fin?'#3d4a52':(on?'#ff7a45':'#6b7c85')));
+    marksEl.appendChild(s);
+
+    var t=document.createElement('a-text');
+    t.setAttribute('value',name);
+    t.setAttribute('position',(p[0]+unit*1.1)+' '+(p[1]+unit*1.1)+' '+p[2]);
+    t.setAttribute('color',fin?'#3d4a52':(on?'#ff7a45':'#6b7c85'));
+    t.setAttribute('width',unit*26);
+    marksEl.appendChild(t);
+  });
+}
+
+function drawButtons(){
+  var bar=document.getElementById('tls'); bar.innerHTML='';
+  ORDER.forEach(function(name){
+    var b=document.createElement('button');
+    b.type='button';
+    b.className='tl'+(done.indexOf(name)>=0?' done':'');
+    b.textContent=name;
+    b.setAttribute('aria-pressed',String(selected.indexOf(name)>=0));
+    b.onclick=function(){
+      var k=selected.indexOf(name);
+      if(k>=0) selected.splice(k,1); else selected.push(name);
+      selected.sort();
+      redraw();
+      msg(selected.length?'<b>'+selected.length+'</b> target'+
+        (selected.length>1?'s':'')+' selected \u2014 routes planned.'
+        :'No targets selected.');
+    };
+    bar.appendChild(b);
+  });
+}
+
+function redraw(){ refreshTunnels(); drawMarks(); drawButtons(); }
+
+/* ---------------- controls ---------------- */
+function controls(on){
+  cam.setAttribute('look-controls',{enabled:on});
+  cam.setAttribute('wasd-controls',{enabled:on,fly:true});
+}
+
+function goHome(){
+  stopFly();
+  cam.setAttribute('position',{x:0,y:0,z:0});
+  cam.setAttribute('rotation',{x:0,y:0,z:0});
+  rig.setAttribute('position',{x:home.x,y:home.y,z:home.z});
+  rig.object3D.position.copy(home);
+  rig.object3D.lookAt(lookHome);
+  var e=rig.object3D.rotation, k=180/Math.PI;
+  rig.setAttribute('rotation',{x:e.x*k,y:e.y*k,z:e.z*k});
+  head.setAttribute('intensity',0);
+  setFog(false); setShell(0.34);
+  controls(true);
+  msg('Outside view. Drag to look, W A S D to move.');
+}
+
+function stopFly(){
+  flying=false;
+  if(raf){ cancelAnimationFrame(raf); raf=null; }
+  controls(true);
+}
+
+/* ---------------- the flight ---------------- */
+function flySequence(list,idx){
+  if(idx>=list.length){
+    stopFly();
+    head.setAttribute('intensity',0);
+    setFog(false); setShell(0.34);
+    msg('Procedure complete \u2014 all selected targets reached.');
+    return;
+  }
+  var name=list[idx], c=curves[name];
+  if(!c){ flySequence(list,idx+1); return; }
+
+  flying=true;
+  controls(false);
+  setFog(true); setShell(0.10);
+  cam.setAttribute('position',{x:0,y:0,z:0});
+  cam.setAttribute('rotation',{x:0,y:0,z:0});
+  head.setAttribute('intensity',1.1);
+  head.setAttribute('distance',unit*70);
+
+  var len=c.getLength(),
+      dur=Math.max(4000,(len/unit)*140)/speedMul,
+      t0=performance.now(),
+      ahead=new THREE.Vector3();
+
+  msg('Navigating to <b>'+name+'</b>\u2026');
+
+  (function step(now){
+    if(!flying) return;
+    var t=Math.min(1,(now-t0)/dur),
+        pos=c.getPointAt(t),
+        tan=c.getTangentAt(Math.min(0.999,t));
+
+    rig.object3D.position.copy(pos);
+    ahead.copy(pos).add(tan);
+    rig.object3D.lookAt(ahead);
+    rig.object3D.rotateY(Math.PI);
+    head.object3D.position.copy(pos);
+
+    if(t>=1){
+      if(done.indexOf(name)<0) done.push(name);
+      redraw();
+      msg('Reached <b>'+name+'</b>.');
+      setTimeout(function(){ if(flying) flySequence(list,idx+1); },900);
+      return;
+    }
+    raf=requestAnimationFrame(step);
+  })(t0);
+}
+
+document.getElementById('fly').onclick=function(){
+  if(!selected.length){ msg('Select at least one target first.'); return; }
+  stopFly();
+  var todo=selected.filter(function(n){ return done.indexOf(n)<0; });
+  if(!todo.length) todo=selected.slice();
+  flySequence(todo,0);
+};
+document.getElementById('stop').onclick=function(){ stopFly(); head.setAttribute('intensity',0); msg('Stopped.'); };
+document.getElementById('out').onclick=goHome;
+document.getElementById('reset').onclick=function(){ done=[]; redraw(); msg('Progress reset.'); };
+document.getElementById('all').onclick=function(){ selected=ORDER.slice(); redraw(); msg('All targets selected.'); };
+document.getElementById('none').onclick=function(){ selected=[]; redraw(); msg('Cleared.'); };
+Array.prototype.forEach.call(document.querySelectorAll('.sp'),function(b){
+  b.onclick=function(){
+    speedMul=Math.min(6,Math.max(0.2,speedMul*parseFloat(b.dataset.m)));
+    document.getElementById('spread').textContent=speedMul.toFixed(1)+'x';
+  };
+});
+
+/* ---------------- startup ---------------- */
+model.addEventListener('model-loaded',function(e){
+  e.detail.model.traverse(function(o){
+    if(o.isMesh&&o.material){
+      var m=o.material;
+      m.transparent=true; m.opacity=0.34;
+      shellMats.push(m);
+      m.side=THREE.DoubleSide; m.depthWrite=false;
+      if(m.color) m.color.set(0xd9a3a0);
+      if(m.emissive) m.emissive.set(0x140b0b);
+      m.needsUpdate=true;
+    }
+  });
+
+  var box=new THREE.Box3().setFromObject(e.detail.model),
+      size=new THREE.Vector3(), c=new THREE.Vector3();
+  box.getSize(size); box.getCenter(c);
+  var big=Math.max(size.x,size.y,size.z)||1;
+
+  unit=big/60;
+
+  bigDim = big;
+  setFog(false);
+
+  cam.setAttribute('camera','near: '+(unit*0.05)+'; far: '+(big*6));
+  cam.setAttribute('wasd-controls',{fly:true,acceleration:big*0.9});
+
+  lookHome.copy(c);
+  home.set(c.x, c.y, c.z + big*0.9);
+
+  buildCurves();
+  selected=['TL3'];
+  redraw();
+  goHome();
+  document.getElementById('spread').textContent='1.0x';
+  msg('Ready \u2014 anatomy loaded, '+Math.round(big)+' units across. '+
+      'Select targets, then Fly selected.');
+});
+
+scene.addEventListener('loaded',function(){
+  setTimeout(function(){
+    if(msgEl.textContent.indexOf('Loading')===0)
+      msg('Anatomy did not load. scene.gltf and scene.bin must sit beside this file.');
+  },9000);
+});
+</script>
+
+</body>
+</html>
